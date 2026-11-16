@@ -1,0 +1,42 @@
+name: Build unsigned tvOS IPA
+
+on:
+  push:
+    branches:
+      - fix/ai-home-row-reorder
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check build inputs
+        run: |
+          test -f MPVKit/Package.swift
+          test -f Vendor/LibTorrent/Package.swift
+          xcodebuild -version
+
+      - name: Install Tuist
+        run: brew install tuist
+
+      - name: Build unsigned IPA
+        env:
+          NUVIO_IPA_OUTPUT_DIR: ${{ runner.temp }}/nuvio-ipa
+        run: bash scripts/build-ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NuvioTV-unsigned-IPA
+          path: ${{ runner.temp }}/nuvio-ipa/NuvioTV-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
