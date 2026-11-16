@@ -465,14 +465,19 @@ enum AddonRatingsService {
         guard !urls.isEmpty else { return [] }
 
         let mediaType = meta.isSeries ? "series" : "movie"
-        let contentID = meta.id
+        // A TMDB catalog card can carry an IMDb id after hero enrichment.
+        // Rating add-ons commonly accept only tt-prefixed ids, so use the
+        // first identity each manifest actually supports.
+        let contentIDs = meta.id.hasPrefix("tmdb:")
+            ? [meta.imdbId, meta.id].compactMap { $0 }
+            : [meta.id, meta.imdbId].compactMap { $0 }
 
         let manifests = await loadManifestsConcurrently(urls: urls)
-        var eligible: [(url: URL, manifest: AddonRatingsManifest)] = []
+        var eligible: [(url: URL, manifest: AddonRatingsManifest, contentID: String)] = []
         for url in urls {
             guard let manifest = manifests[url],
-                  manifest.supportsRatings(type: mediaType, id: contentID) else { continue }
-            eligible.append((url, manifest))
+                  let contentID = contentIDs.first(where: { manifest.supportsRatings(type: mediaType, id: $0) }) else { continue }
+            eligible.append((url, manifest, contentID))
         }
         guard !eligible.isEmpty else { return [] }
 
@@ -485,7 +490,7 @@ enum AddonRatingsService {
                             manifestURL: item.url,
                             manifest: item.manifest,
                             type: mediaType,
-                            id: contentID,
+                            id: item.contentID,
                             session: session,
                             defaults: defaults
                         )

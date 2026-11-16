@@ -10185,10 +10185,17 @@ struct TVHomeView: View {
         repository: CatalogRepository,
         id: String,
         type: String,
+        aiCatalogMeta: NuvioMeta? = nil,
         timeoutSeconds: Double = 2.0
     ) async -> NuvioMeta? {
         await withTaskGroup(of: EnrichmentFetchOutcome.self) { group in
             group.addTask {
+                // AI catalogs already have the TMDB identity. Ask TMDB for the
+                // focused title's logo and IMDb id directly, avoiding the slower
+                // add-on/Cinemeta resolution chain used for other catalogs.
+                if let aiCatalogMeta {
+                    return .completed(await TmdbDetailsService.localizedMetadata(for: aiCatalogMeta))
+                }
                 let meta = try? await repository.getMetadata(id: id, type: type)
                 return .completed(meta)
             }
@@ -10243,6 +10250,8 @@ struct TVHomeView: View {
         let repository = self.repository
         let targetId = settledMeta.id
         let targetType = settledMeta.type
+        let aiCatalogMeta = AIHomeCatalogs.isSectionID(sectionId) && settledMeta.tmdbId != nil
+            ? settledMeta : nil
         focusWork.heroEnrichmentTask?.cancel()
         focusWork.heroEnrichmentTask = Task { @MainActor in
             guard let fetched = await Task.detached(priority: .utility, operation: {
@@ -10250,7 +10259,8 @@ struct TVHomeView: View {
                     repository: repository,
                     id: targetId,
                     type: targetType,
-                    timeoutSeconds: 2.0
+                    aiCatalogMeta: aiCatalogMeta,
+                    timeoutSeconds: aiCatalogMeta == nil ? 2.0 : 5.0
                 )
             }).value else {
                 return

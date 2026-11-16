@@ -834,7 +834,7 @@ enum TmdbDetailsService {
             posterUrl: nonEmpty(meta.posterUrl) ?? tmdbPosterURL,
             backgroundUrl: resolvedBackground,
             logoUrl: tmdbLogoURL ?? meta.logoUrl,
-            imdbId: meta.imdbId,
+            imdbId: meta.imdbId ?? details.imdbId ?? details.externalIds?.imdbId,
             tmdbId: meta.tmdbId ?? resolved.id,
             type: resolvedType,
             year: meta.year,
@@ -1342,6 +1342,7 @@ enum TmdbDetailsService {
         var appendItems = ["images", "translations"]
         if mediaType == "tv" {
             appendItems.append("content_ratings")
+            appendItems.append("external_ids")
         } else {
             appendItems.append("release_dates")
         }
@@ -1836,6 +1837,8 @@ private struct TmdbLocalizedDetailsResponse: Decodable {
     let originalName: String?
     let originalLanguage: String?
     let overview: String?
+    let imdbId: String?
+    let externalIds: TmdbExternalIDsResponse?
     let posterPath: String?
     let backdropPath: String?
     let images: TmdbImageCollection?
@@ -1846,6 +1849,8 @@ private struct TmdbLocalizedDetailsResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case title, name, overview, genres, translations
+        case imdbId = "imdb_id"
+        case externalIds = "external_ids"
         case originalTitle = "original_title"
         case originalName = "original_name"
         case originalLanguage = "original_language"
@@ -1854,6 +1859,14 @@ private struct TmdbLocalizedDetailsResponse: Decodable {
         case images
         case contentRatings = "content_ratings"
         case releaseDates = "release_dates"
+    }
+}
+
+private struct TmdbExternalIDsResponse: Decodable {
+    let imdbId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case imdbId = "imdb_id"
     }
 }
 
