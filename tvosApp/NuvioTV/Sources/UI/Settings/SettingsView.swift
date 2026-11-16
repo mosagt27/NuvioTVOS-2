@@ -5396,6 +5396,9 @@ private struct TopShelfChipButton: View {
 /// rows, but does not mark every row individually as disabled.
 private func layoutVisibleHomeCatalogRows() -> [TVHomeCatalogOrder.SnapshotRow] {
     let rows = TVHomeCatalogOrder.snapshotRows()
+    let enabledAIKinds = SurpriseMeAIConfiguration.current().isUsable
+        ? AIHomeCatalogs.enabledKinds() : []
+    let enabledAIIDs = Set(enabledAIKinds.map(\.sectionID))
     let disabledAddonIDs = TVHomeCatalogOrder.disabledAddonIDs()
     let disabledAddonNames = TVHomeCatalogOrder.disabledAddonNames()
     let deletedKeys = TVHomeCatalogOrder.deletedCatalogKeys()
@@ -5407,6 +5410,9 @@ private func layoutVisibleHomeCatalogRows() -> [TVHomeCatalogOrder.SnapshotRow] 
         }
     )
     let sourceRows = rows.filter { row in
+        if AIHomeCatalogs.isSectionID(row.id) {
+            return enabledAIIDs.contains(row.id)
+        }
         // Snapshots intentionally retain rows across Home reloads. A removed
         // add-on must not remain selectable just because its snapshot survives.
         // Use installed preferences, not network results or enabled-only URLs.
@@ -5576,7 +5582,26 @@ private func layoutVisibleHomeCatalogRows() -> [TVHomeCatalogOrder.SnapshotRow] 
         }
     }
 
+    // The viewer can place AI rows before their first recommendations arrive.
+    let existingAIIDs = Set(merged.map(\.id))
+    for kind in enabledAIKinds where !existingAIIDs.contains(kind.sectionID) {
+        merged.append(
+            TVHomeCatalogOrder.SnapshotRow(
+                id: kind.sectionID,
+                title: kind.title,
+                addonName: L10n.string("ai_catalog_source", fallback: "AI"),
+                contentType: kind.contentType
+            )
+        )
+    }
+
     let orderKeys = TVHomeCatalogOrder.effectiveOrderKeys()
+    let orderedKeySet = Set(orderKeys)
+    let defaultAI = enabledAIKinds.compactMap { kind in
+        orderedKeySet.contains(kind.sectionID) ? nil : merged.first(where: { $0.id == kind.sectionID })
+    }
+    let defaultAIIDs = Set(defaultAI.map(\.id))
+    merged.removeAll { defaultAIIDs.contains($0.id) }
     if !orderKeys.isEmpty {
         var indexByKey: [String: Int] = [:]
         for (idx, key) in orderKeys.enumerated() where indexByKey[key] == nil {
@@ -5601,7 +5626,7 @@ private func layoutVisibleHomeCatalogRows() -> [TVHomeCatalogOrder.SnapshotRow] 
         let unknown = merged.filter { bestIndex($0) == nil }
         merged = known + unknown
     }
-    return merged
+    return defaultAI + merged
 }
 
 private struct IntegrationSettingsView: View {

@@ -9800,29 +9800,33 @@ struct TVHomeView: View {
         return loadedSections
     }
 
-    /// Pinning is an invariant above the user/catalog order: saved cross-device
-    /// row positions may arrange the remainder, but can never push a pinned
-    /// collection below a catalog.
+    /// New AI rows lead Home in their natural order until the viewer places
+    /// them in Settings. Once saved, the complete chosen row order wins.
     private func homeOrderedSections(_ sections: [TVHomeSection]) -> [TVHomeSection] {
         guard collectionHome == nil else { return sections }
-        let aiSections = sections.filter { AIHomeCatalogs.isSectionID($0.id) }
-        let pinnedCollections = sections.filter {
-            $0.isCollectionRow && $0.isPinnedCollection
+        let orderedKeys = Set(TVHomeCatalogOrder.effectiveOrderKeys())
+        let defaultAI = sections.filter {
+            AIHomeCatalogs.isSectionID($0.id) && !orderedKeys.contains($0.id)
         }
-        let remainder = sections.filter {
-            !AIHomeCatalogs.isSectionID($0.id) && !($0.isCollectionRow && $0.isPinnedCollection)
+        let defaultIDs = Set(defaultAI.map(\.id))
+        let remainder = sections.filter { !defaultIDs.contains($0.id) }
+        // Keep the existing pinned-collection rule for layouts that have not
+        // explicitly placed an AI row in Settings.
+        if !remainder.contains(where: { AIHomeCatalogs.isSectionID($0.id) }) {
+            let pinned = remainder.filter { $0.isCollectionRow && $0.isPinnedCollection }
+            let unpinned = remainder.filter { !($0.isCollectionRow && $0.isPinnedCollection) }
+            return defaultAI + pinned + TVHomeCatalogOrder.apply(to: unpinned)
         }
-        return aiSections + pinnedCollections + TVHomeCatalogOrder.apply(to: remainder)
+        return defaultAI + TVHomeCatalogOrder.apply(to: remainder)
     }
 
-    /// Puts the current For You rows at the top of the rows already on Home,
-    /// without reloading the catalogs.
+    /// Replaces the current For You rows without losing their saved positions.
     @MainActor
     private func applyAIHomeSections() {
         guard collectionHome == nil, !store.sections.isEmpty else { return }
         let ai = AIHomeCatalogStore.shared.sections()
         let rest = store.sections.filter { !AIHomeCatalogs.isSectionID($0.id) }
-        let updated = ai + rest
+        let updated = homeOrderedSections(ai + rest)
         let unchanged = updated.count == store.sections.count && zip(updated, store.sections).allSatisfy { new, old in
             new.id == old.id && new.items.map(\.id) == old.items.map(\.id)
         }
@@ -9838,9 +9842,9 @@ struct TVHomeView: View {
         TVHomeDebugTrace.measure("home.publishHomeSections catalog=\(catalogSections.count) col=\(collectionSections.count)") {
             let pinned = collectionSections.filter(\.isPinnedCollection)
             let unpinned = collectionSections.filter { !$0.isPinnedCollection }
-            // Settings > Integrations > Surprise Me > For You rows go first.
+            // For You rows lead by default; Settings can place them elsewhere.
             let aiSections = collectionHome == nil ? AIHomeCatalogStore.shared.sections() : []
-            let composed = aiSections + homeOrderedSections(pinned + catalogSections + unpinned)
+            let composed = homeOrderedSections(aiSections + pinned + catalogSections + unpinned)
 
             // Rows this load still owes, drawn as skeletons in their saved position.
             let published = Set(composed.map(\.id))
