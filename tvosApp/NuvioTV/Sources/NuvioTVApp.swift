@@ -9198,6 +9198,14 @@ struct TVHomeView: View {
         restoreCardID: String? = nil,
         preserveCollectionOrigin: Bool = false
     ) {
+        // AI rows are assembled outside the catalog repository. Give Details
+        // their visible card as a frame-zero seed while full metadata loads.
+        if let aiMeta = store.sections
+            .first(where: { AIHomeCatalogs.isSectionID($0.id) && $0.items.contains(where: { $0.id == id }) })?
+            .items.first(where: { $0.id == id }) {
+            let seed = focusedMeta.flatMap { $0.id == id ? $0 : nil } ?? aiMeta
+            CinemetaCatalogRepository.cacheCatalogMetadata(seed)
+        }
         prepareForOverlayPresentation(restoreCardID: restoreCardID)
         if preserveCollectionOrigin, let onNavigateToContinueWatchingDetails {
             onNavigateToContinueWatchingDetails(id, type)
@@ -14534,7 +14542,7 @@ private struct TVGridHeroSlideshowView: View {
     }
 }
 
-private struct CachedHeroLogo: View {
+struct CachedHeroLogo: View {
     let url: String
     let title: String
     /// The title's whole name under its logo: AniList's logo is the series', so a second

@@ -547,14 +547,19 @@ class DetailsViewModel: ObservableObject {
                 people: relatedPeopleSnapshot ?? [],
                 simklRatings: simklRatingsSnapshot
             )
-            if let enrichmentStarter = injectedEnrichmentStarter {
-                enrichmentStarter(cached, requestGeneration)
-            } else {
-                loadEnrichment(
-                    for: cached,
-                    generation: requestGeneration,
-                    skipMoreLikeThisFetch: hasRelatedItemsSnapshot
-                )
+            // A compact TMDB card is enough to show Details immediately, but
+            // its ratings/related-title requests need the resolved IMDb id.
+            // The deferred path starts enrichment after getMetadata returns.
+            if cachedHadImdbId || !cached.id.hasPrefix("tmdb:") {
+                if let enrichmentStarter = injectedEnrichmentStarter {
+                    enrichmentStarter(cached, requestGeneration)
+                } else {
+                    loadEnrichment(
+                        for: cached,
+                        generation: requestGeneration,
+                        skipMoreLikeThisFetch: hasRelatedItemsSnapshot
+                    )
+                }
             }
         } else if uiState.meta?.id != id {
             uiState = DetailsUiState(

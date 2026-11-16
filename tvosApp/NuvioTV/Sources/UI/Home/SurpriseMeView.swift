@@ -19,6 +19,7 @@ struct SurpriseMeView: View {
     @AppStorage(SettingsKey.surpriseMeUseTMDB) private var useTMDB = true
     @AppStorage(SettingsKey.surpriseMeUseTrackers) private var useTrackers = true
     @AppStorage(SettingsKey.surpriseMeContent) private var contentRaw = SurpriseMeContent.all.rawValue
+    @AppStorage(SettingsKey.homeHeroRatingsEnabled) private var homeHeroRatingsEnabled = true
 
     @State private var profile = TasteProfile.empty
     @State private var history = SurpriseMeHistory.empty
@@ -27,6 +28,8 @@ struct SurpriseMeView: View {
     @State private var pool = SurpriseMeCandidatePool()
     @State private var pick: NuvioMeta?
     @State private var pickReason: String?
+    @State private var fetchedRatings: [NuvioExternalRating] = []
+    @State private var fetchedRatingsKey: String?
     @State private var offered: Set<String> = []
     /// What the viewer did with earlier suggestions, kept across launches, so
     /// both the AI and the taste profile learn what lands and what doesn't.
@@ -73,6 +76,30 @@ struct SurpriseMeView: View {
         }
         .onChange(of: useTMDB) { _, _ in syncPool() }
         .onChange(of: contentRaw) { _, _ in syncPool() }
+        .task(id: "\(isActive)|\(pick?.id ?? "")") {
+            guard isActive, let current = pick, current.needsHeroMetadataEnrichment else { return }
+            let full: NuvioMeta
+            if current.tmdbId != nil {
+                full = await TmdbDetailsService.localizedMetadata(for: current)
+            } else if let fetched = try? await CinemetaCatalogRepository().getMetadata(id: current.id, type: current.type) {
+                full = fetched
+            } else {
+                return
+            }
+            guard !Task.isCancelled, pick?.id == current.id else { return }
+            let enriched = current.fillingMissingHeroMetadata(from: full)
+            pick = enriched
+            CinemetaCatalogRepository.cacheCatalogMetadata(enriched)
+        }
+        .task(id: "\(isActive)|\(pick?.id ?? "")|\(pick?.imdbId ?? "")|\(homeHeroRatingsEnabled)") {
+            guard isActive, homeHeroRatingsEnabled, let current = pick else { return }
+            let key = AddonRatingsService.heroRatingsCacheKey(for: current)
+            let ratings = await AddonRatingsService.fetchHeroRatings(for: current)
+            guard !Task.isCancelled, pick?.id == current.id,
+                  pick?.imdbId == current.imdbId else { return }
+            fetchedRatings = ratings
+            fetchedRatingsKey = key
+        }
     }
 
     private var poolKey: SurpriseMeCandidatePool.Key {
@@ -184,14 +211,29 @@ struct SurpriseMeView: View {
                 .foregroundColor(.white.opacity(0.75))
                 .frame(maxWidth: 900, alignment: .leading)
 
-            Text(meta.name)
-                .font(.system(size: 64, weight: .bold))
-                .foregroundColor(.white)
-                .lineLimit(2)
+            if let logoURL = meta.logoUrl, !logoURL.isEmpty {
+                CachedHeroLogo(url: logoURL, title: meta.name, logoMaxHeight: 136)
+            } else {
+                Text(meta.name)
+                    .font(.system(size: 64, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+            }
 
             Text(metaLine(for: meta))
                 .font(.system(size: 26, weight: .medium))
                 .foregroundColor(.white.opacity(0.8))
+
+            if homeHeroRatingsEnabled {
+                let ratings = AddonRatingsService.filteredAndOrderedHeroRatings(
+                    (fetchedRatingsKey == AddonRatingsService.heroRatingsCacheKey(for: meta) ? fetchedRatings : [])
+                        + (meta.externalRatings ?? [])
+                )
+                let badges = TvRatingBadge.badges(from: ratings)
+                if !badges.isEmpty {
+                    TvHeroRatingsRow(badges: badges, iconHeight: 30, fontSize: 24)
+                }
+            }
 
             if let description = meta.description, !description.isEmpty {
                 Text(description)
@@ -341,5 +383,8 @@ struct SurpriseMeView: View {
         offered.insert(meta.id)
         pickReason = reason
         pick = meta
+        fetchedRatings = []
+        fetchedRatingsKey = nil
+        CinemetaCatalogRepository.cacheCatalogMetadata(meta)
     }
 }
