@@ -6894,6 +6894,9 @@ struct TVHomeView: View {
                 force: true
             )
             guard isActive else { return }
+            // A watched title must leave the cached For You row immediately,
+            // even when the change happened inside Details over Home.
+            applyAIHomeSections()
             if isFullScreenOverlayPresented {
                 pendingContinueWatchingRefreshAfterOverlay = true
                 return
@@ -9794,13 +9797,14 @@ struct TVHomeView: View {
     /// collection below a catalog.
     private func homeOrderedSections(_ sections: [TVHomeSection]) -> [TVHomeSection] {
         guard collectionHome == nil else { return sections }
+        let aiSections = sections.filter { AIHomeCatalogs.isSectionID($0.id) }
         let pinnedCollections = sections.filter {
             $0.isCollectionRow && $0.isPinnedCollection
         }
         let remainder = sections.filter {
-            !($0.isCollectionRow && $0.isPinnedCollection)
+            !AIHomeCatalogs.isSectionID($0.id) && !($0.isCollectionRow && $0.isPinnedCollection)
         }
-        return pinnedCollections + TVHomeCatalogOrder.apply(to: remainder)
+        return aiSections + pinnedCollections + TVHomeCatalogOrder.apply(to: remainder)
     }
 
     /// Puts the current For You rows at the top of the rows already on Home,
@@ -10037,10 +10041,13 @@ struct TVHomeView: View {
         guard store.isLoaded(for: identity) else { return }
         let fresh = await loadCollectionSections()
         guard !Task.isCancelled, identity == contentIdentity, store.isLoaded(for: identity) else { return }
-        let catalogRows = store.sections.filter { !$0.isCollectionRow }
+        // Re-read the For You rows after a collection/watched update. Keeping
+        // the old row here can restore a title that was just marked watched.
+        let aiRows = AIHomeCatalogStore.shared.sections()
+        let catalogRows = store.sections.filter { !$0.isCollectionRow && !AIHomeCatalogs.isSectionID($0.id) }
         let pinned = fresh.filter(\.isPinnedCollection)
         let unpinned = fresh.filter { !$0.isPinnedCollection }
-        let merged = homeOrderedSections(pinned + catalogRows + unpinned)
+        let merged = homeOrderedSections(aiRows + pinned + catalogRows + unpinned)
         TVHomeCatalogOrder.scheduleSnapshotWrite(merged)
         // Compare ids *and* folder tile shapes / titles so edits like switching
         // Poster ↔ Landscape actually re-render Home (id-only checks skip them).
